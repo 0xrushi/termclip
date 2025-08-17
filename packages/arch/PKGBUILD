@@ -1,32 +1,67 @@
 # Maintainer: 0xrushi <your-email@example.com>
 pkgname=termclip
-pkgver=1.0.1
+pkgver=0.0.0.r8.b6f5a76
 pkgrel=1
 pkgdesc="Cross-platform terminal clipboard helper with OSC 52 support"
 arch=('any')
 url="https://github.com/0xrushi/termclip"
 license=('MIT')
-depends=('python>=3.8')
+depends=('python')
 optdepends=(
     'xclip: X11 clipboard support'
     'xsel: Alternative X11 clipboard support'
     'wl-clipboard: Wayland clipboard support'
+    'tmux: Enhanced tmux clipboard support'
 )
-source=("$pkgname-$pkgver.tar.gz::https://github.com/0xrushi/termclip/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')  # Replace with actual sha256sum
+makedepends=('git')
+provides=('termclip')
+conflicts=('termclip')
+source=("git+https://github.com/0xrushi/termclip.git#branch=master")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$srcdir/$pkgname"
+    # Simple version using commit hash
+    printf "%s.r%s.%s" "0.0.0" \
+           "$(git rev-list --count HEAD)" \
+           "$(git rev-parse --short HEAD)"
+}
+
+prepare() {
+    cd "$srcdir/$pkgname"
+    # Ensure we have a clean working directory
+    git reset --hard HEAD
+    git clean -fd
+}
 
 build() {
-    cd "$srcdir/$pkgname-$pkgver"
+    cd "$srcdir/$pkgname"
+    # No compilation needed for Python script, but we can add validation
+    echo "Building termclip..."
 }
 
 check() {
-    cd "$srcdir/$pkgname-$pkgver"
+    cd "$srcdir/$pkgname"
+    
     # Basic syntax check
+    echo "Running syntax check..."
     python -m py_compile termclip.py
+    
+    # Run basic tests if they exist
+    if [ -f "test.sh" ]; then
+        echo "Running tests..."
+        bash test.sh
+    fi
+    
+    # Check if the script is executable
+    if [ ! -x "termclip.py" ]; then
+        echo "Making termclip.py executable..."
+        chmod +x termclip.py
+    fi
 }
 
 package() {
-    cd "$srcdir/$pkgname-$pkgver"
+    cd "$srcdir/$pkgname"
     
     # Install the script
     install -Dm755 termclip.py "$pkgdir/usr/bin/termclip"
@@ -36,4 +71,22 @@ package() {
     
     # Install license
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    
+    # Install man page if it exists
+    if [ -f "termclip.1" ]; then
+        install -Dm644 termclip.1 "$pkgdir/usr/share/man/man1/termclip.1"
+    fi
+    
+    # Install completion files if they exist
+    if [ -f "completion/termclip.bash" ]; then
+        install -Dm644 completion/termclip.bash "$pkgdir/usr/share/bash-completion/completions/termclip"
+    fi
+    
+    if [ -f "completion/termclip.zsh" ]; then
+        install -Dm644 completion/termclip.zsh "$pkgdir/usr/share/zsh/site-functions/_termclip"
+    fi
+    
+    if [ -f "completion/termclip.fish" ]; then
+        install -Dm644 completion/termclip.fish "$pkgdir/usr/share/fish/vendor_completions/termclip.fish"
+    fi
 }

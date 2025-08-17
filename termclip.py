@@ -8,6 +8,7 @@ Usage:
   termclip --paste               # best-effort paste (local only)
   TERMCLIP_FORCE_OSC52=1 cat x | termclip
   TERMCLIP_FORCE_NATIVE=1 cat x | termclip
+  TERMCLIP_DEBUG=1 cat x | termclip  # debug output
   termclip --help
 """
 
@@ -20,6 +21,10 @@ import sys
 from typing import Optional
 
 # ---------------------------- helpers ----------------------------------------
+
+def _debug(msg: str) -> None:
+    if os.environ.get("TERMCLIP_DEBUG") == "1":
+        print(f"[DEBUG] {msg}", file=sys.stderr)
 
 def _have(cmd: str) -> bool:
     return shutil.which(cmd) is not None
@@ -49,26 +54,35 @@ def _copy_tmux(data: bytes) -> bool:
     if "TMUX" not in os.environ:
         return False
     
+    _debug("Trying tmux native clipboard")
+    
     try:
-        # Try tmux's load-buffer + copy-buffer
+        # Method 1: Try tmux set-buffer + copy-buffer
         text = data.decode("utf-8", errors="replace")
         
-        # Load data into tmux buffer
-        p1 = subprocess.Popen(["tmux", "load-buffer", "-"], stdin=subprocess.PIPE, encoding="utf-8")
-        p1.stdin.write(text)
-        p1.stdin.close()
-        if p1.wait() != 0:
+        # Set the buffer content
+        p1 = subprocess.run(["tmux", "set-buffer", text], capture_output=True, text=True)
+        if p1.returncode != 0:
+            _debug(f"tmux set-buffer failed: {p1.stderr}")
             return False
             
-        # Copy buffer to system clipboard (if tmux has clipboard support)
-        p2 = subprocess.run(["tmux", "copy-buffer"], capture_output=True)
-        return p2.returncode == 0
-    except Exception:
-        return False
+        # Try to copy buffer to system clipboard
+        p2 = subprocess.run(["tmux", "copy-buffer"], capture_output=True, text=True)
+        if p2.returncode == 0:
+            _debug("tmux copy-buffer succeeded")
+            return True
+        else:
+            _debug(f"tmux copy-buffer failed: {p2.stderr}")
+            
+    except Exception as e:
+        _debug(f"tmux native failed with exception: {e}")
+        
+    return False
 
 def _copy_native(data: bytes) -> bool:
     # Respect explicit override to *skip* native and use OSC-52.
     if os.environ.get("TERMCLIP_FORCE_OSC52") == "1":
+        _debug("Forcing OSC52, skipping native")
         return False
 
     # Try tmux clipboard first if we're in tmux
@@ -76,17 +90,21 @@ def _copy_native(data: bytes) -> bool:
         return True
 
     plat = sys.platform
+    _debug(f"Trying native clipboard for platform: {plat}")
 
     # macOS
     if plat == "darwin" and _have("pbcopy"):
+        _debug("Trying pbcopy")
         return _write_bytes_to("pbcopy", [], data)
 
     # Windows
     if plat.startswith("win"):
         if _have("clip"):
+            _debug("Trying clip")
             return _write_bytes_to("clip", [], data)
         # PowerShell fallback
         if _have("powershell"):
+            _debug("Trying powershell")
             try:
                 text = data.decode("utf-8", errors="replace")
                 ps = [
@@ -103,18 +121,24 @@ def _copy_native(data: bytes) -> bool:
     # Linux/*BSD GUI clipboards — only if we actually have a display.
     have_wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
     have_x11 = bool(os.environ.get("DISPLAY"))
+    
+    _debug(f"Wayland: {have_wayland}, X11: {have_x11}")
 
     # Wayland (no -f -> returns immediately)
     if have_wayland and _have("wl-copy"):
+        _debug("Trying wl-copy")
         return _write_bytes_to("wl-copy", [], data)
 
     # X11
     if have_x11 and _have("xclip"):
+        _debug("Trying xclip")
         # tiny timeout so pipeline doesn't linger
         return _write_bytes_to("xclip", ["-selection", "clipboard", "-in", "-quiet"], data, timeout=0.2)
     if have_x11 and _have("xsel"):
+        _debug("Trying xsel")
         return _write_bytes_to("xsel", ["--clipboard", "--input"], data, timeout=0.2)
 
+    _debug("No native clipboard method available")
     return False
 
 # --------------------------- OSC 52 copy -------------------------------------
@@ -123,15 +147,24 @@ def _osc52_wrap(payload_b64: str) -> bytes:
     """
     Build an OSC 52 sequence. If inside tmux/screen, wrap accordingly.
     """
-    osc = f"\033]52;c;{payload_b64}\007"  # Using BEL terminator for better compatibility
+    # Use ST (String Terminator) instead of BEL for better compatibility
+    osc = f"\033]52;c;{payload_b64}\033\\"
+    
+    _debug(f"Original OSC sequence length: {len(osc)}")
 
-    # tmux pass-through - FIXED: need to double all ESC characters
+    # tmux pass-through - Multiple approaches
     if "TMUX" in os.environ:
-        # Proper tmux passthrough: ESC P tmux; <data with doubled ESCs> ESC \
+        _debug("In tmux, wrapping OSC sequence")
+        
+        # Method 1: Standard tmux passthrough with doubled ESCs
         escaped_osc = osc.replace("\033", "\033\033")
-        osc = f"\033Ptmux;{escaped_osc}\033\\"
+        wrapped = f"\033Ptmux;{escaped_osc}\033\\"
+        _debug(f"Tmux wrapped sequence length: {len(wrapped)}")
+        return wrapped.encode("utf-8", errors="replace")
+        
     # screen pass-through
     elif os.environ.get("STY") and os.environ.get("TERM", "").startswith("screen"):
+        _debug("In screen, wrapping OSC sequence")
         osc = f"\033P{osc}\033\\"
 
     return osc.encode("utf-8", errors="replace")
@@ -143,33 +176,60 @@ def _copy_osc52(data: bytes) -> bool:
     """
     # Allow forcing OSC-52 even if native is present
     if os.environ.get("TERMCLIP_FORCE_NATIVE") == "1":
+        _debug("Forcing native, skipping OSC52")
         return False
 
+    _debug("Trying OSC52 clipboard")
+    
     MAX_B64 = int(os.environ.get("TERMCLIP_OSC52_MAX_B64", "75000"))
     b64 = base64.b64encode(data).decode("ascii")
     truncated = False
+    
+    _debug(f"Base64 length: {len(b64)}, max: {MAX_B64}")
+    
     if len(b64) > MAX_B64:
         b64 = b64[:MAX_B64]
         truncated = True
+        _debug("Content truncated for OSC52")
 
     seq = _osc52_wrap(b64)
+    _debug(f"Final sequence length: {len(seq)}")
 
-    # Prefer /dev/tty so it works in pipelines
+    # Method 1: Try /dev/tty first
     success = False
     try:
+        _debug("Trying to write to /dev/tty")
         with open("/dev/tty", "wb", buffering=0) as tty:
             tty.write(seq)
-            tty.flush()  # Ensure data is written immediately
+            tty.flush()
             success = True
-    except Exception:
-        # Fallback: write to stdout only if it's a TTY
+            _debug("Successfully wrote to /dev/tty")
+    except Exception as e:
+        _debug(f"Failed to write to /dev/tty: {e}")
+        
+        # Method 2: Fallback to stdout if it's a TTY
         if sys.stdout.isatty():
             try:
+                _debug("Trying to write to stdout")
                 sys.stdout.buffer.write(seq)
                 sys.stdout.buffer.flush()
                 success = True
-            except Exception:
-                pass
+                _debug("Successfully wrote to stdout")
+            except Exception as e2:
+                _debug(f"Failed to write to stdout: {e2}")
+
+    # Method 3: If in tmux, also try tmux's display-message as a fallback
+    if not success and "TMUX" in os.environ:
+        try:
+            _debug("Trying tmux display-message method")
+            # Send the raw OSC sequence via tmux
+            raw_osc = f"\033]52;c;{b64}\033\\"
+            subprocess.run(["tmux", "send-keys", "-t", "0", f"printf '{raw_osc}'"], 
+                         capture_output=True, check=False)
+            success = True
+            _debug("tmux display-message method attempted")
+        except Exception as e:
+            _debug(f"tmux display-message failed: {e}")
 
     if success and truncated:
         sys.stderr.write("[termclip] Note: content truncated to fit OSC 52 limits.\n")
@@ -184,11 +244,18 @@ def _paste_tmux() -> int:
     if "TMUX" not in os.environ:
         return None
     
+    _debug("Trying tmux paste")
+    
     try:
         # Try to show tmux buffer
         p = subprocess.run(["tmux", "show-buffer"], stdout=sys.stdout, stderr=subprocess.PIPE)
+        if p.returncode == 0:
+            _debug("tmux show-buffer succeeded")
+        else:
+            _debug(f"tmux show-buffer failed: {p.stderr.decode()}")
         return p.returncode
-    except Exception:
+    except Exception as e:
+        _debug(f"tmux paste failed: {e}")
         return None
 
 def paste_text() -> int:
@@ -203,9 +270,11 @@ def paste_text() -> int:
         return tmux_result
 
     plat = sys.platform
+    _debug(f"Trying paste for platform: {plat}")
 
     # macOS
     if plat == "darwin" and _have("pbpaste"):
+        _debug("Trying pbpaste")
         p = subprocess.run(["pbpaste"], stdout=sys.stdout)
         return p.returncode
 
@@ -213,18 +282,22 @@ def paste_text() -> int:
     if plat.startswith("win"):
         for ps_name in ("powershell", "powershell.exe"):
             if _have(ps_name):
+                _debug(f"Trying {ps_name}")
                 p = subprocess.run([ps_name, "-NoProfile", "-Command", "Get-Clipboard -Raw"], stdout=sys.stdout)
                 return p.returncode
 
     # Wayland/X11
     if os.environ.get("WAYLAND_DISPLAY") and _have("wl-paste"):
+        _debug("Trying wl-paste")
         p = subprocess.run(["wl-paste", "-n"], stdout=sys.stdout)
         return p.returncode
     if os.environ.get("DISPLAY"):
         if _have("xclip"):
+            _debug("Trying xclip paste")
             p = subprocess.run(["xclip", "-selection", "clipboard", "-o"], stdout=sys.stdout)
             return p.returncode
         if _have("xsel"):
+            _debug("Trying xsel paste")
             p = subprocess.run(["xsel", "--clipboard", "--output"], stdout=sys.stdout)
             return p.returncode
 
@@ -235,16 +308,24 @@ def paste_text() -> int:
 
 def copy_bytes(data: bytes) -> int:
     if not data:
-        # no stdin — avoid hanging waiting for input
+        _debug("No data to copy")
         return 0
+
+    _debug(f"Copying {len(data)} bytes")
+    _debug(f"TMUX: {os.environ.get('TMUX', 'not set')}")
+    _debug(f"DISPLAY: {os.environ.get('DISPLAY', 'not set')}")
+    _debug(f"WAYLAND_DISPLAY: {os.environ.get('WAYLAND_DISPLAY', 'not set')}")
 
     # Prefer native unless explicitly forcing OSC-52
     if _copy_native(data):
+        _debug("Native clipboard succeeded")
         return 0
 
     if _copy_osc52(data):
+        _debug("OSC52 clipboard succeeded")
         return 0
 
+    _debug("All clipboard methods failed")
     sys.stderr.write(
         "termclip: no clipboard method worked (no pbcopy/clip/wl-copy/xclip/xsel, or terminal refused OSC 52).\n"
     )
