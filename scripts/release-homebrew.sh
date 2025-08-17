@@ -54,19 +54,19 @@ class Termclip < Formula
   license "MIT"
   head "https://github.com/0xrushi/termclip.git", branch: "main"
 
-  depends_on "python@3.12"
+    depends_on "python@3.12"
 
-  def install
-    # Install the script to libexec and create a wrapper
-    libexec.install "termclip.py"
-    
-    # Create wrapper script that uses Homebrew's Python
-    (bin/"termclip").write <<~EOS
-      #!/bin/bash
-      exec "#{Formula["python@3.12"].opt_bin}/python3" "#{libexec}/termclip.py" "\$@"
-    EOS
-    
-    chmod 0755, bin/"termclip"
+    def install
+        # Install the script to libexec and create a wrapper
+        libexec.install "termclip.py"
+
+        # Create wrapper script that uses env to find python3.12
+        (bin/"termclip").write <<~EOS
+            #!/bin/bash
+            exec /usr/bin/env python3.12 "#{libexec}/termclip.py" "\$@"
+        EOS
+
+        chmod 0755, bin/"termclip"
   end
 
   test do
