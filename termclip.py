@@ -44,10 +44,36 @@ def _write_bytes_to(cmd: str, args: list, data: bytes, timeout: Optional[float] 
 
 # --------------------------- native copy -------------------------------------
 
+def _copy_tmux(data: bytes) -> bool:
+    """Try tmux's built-in clipboard commands first."""
+    if "TMUX" not in os.environ:
+        return False
+    
+    try:
+        # Try tmux's load-buffer + copy-buffer
+        text = data.decode("utf-8", errors="replace")
+        
+        # Load data into tmux buffer
+        p1 = subprocess.Popen(["tmux", "load-buffer", "-"], stdin=subprocess.PIPE, encoding="utf-8")
+        p1.stdin.write(text)
+        p1.stdin.close()
+        if p1.wait() != 0:
+            return False
+            
+        # Copy buffer to system clipboard (if tmux has clipboard support)
+        p2 = subprocess.run(["tmux", "copy-buffer"], capture_output=True)
+        return p2.returncode == 0
+    except Exception:
+        return False
+
 def _copy_native(data: bytes) -> bool:
     # Respect explicit override to *skip* native and use OSC-52.
     if os.environ.get("TERMCLIP_FORCE_OSC52") == "1":
         return False
+
+    # Try tmux clipboard first if we're in tmux
+    if _copy_tmux(data):
+        return True
 
     plat = sys.platform
 
@@ -97,17 +123,18 @@ def _osc52_wrap(payload_b64: str) -> bytes:
     """
     Build an OSC 52 sequence. If inside tmux/screen, wrap accordingly.
     """
-    osc = f"\033]52;c;{payload_b64}\a"
+    osc = f"\033]52;c;{payload_b64}\007"  # Using BEL terminator for better compatibility
 
-    # tmux pass-through
+    # tmux pass-through - FIXED: need to double all ESC characters
     if "TMUX" in os.environ:
-        # DCS passthrough for tmux: ESC P tmux; ESC <OSC> ESC \\
-        osc = f"\033Ptmux;\033{osc}\033\\"
+        # Proper tmux passthrough: ESC P tmux; <data with doubled ESCs> ESC \
+        escaped_osc = osc.replace("\033", "\033\033")
+        osc = f"\033Ptmux;{escaped_osc}\033\\"
     # screen pass-through
     elif os.environ.get("STY") and os.environ.get("TERM", "").startswith("screen"):
         osc = f"\033P{osc}\033\\"
 
-    return osc.encode("ascii", errors="ignore")
+    return osc.encode("utf-8", errors="replace")
 
 def _copy_osc52(data: bytes) -> bool:
     """
@@ -128,29 +155,41 @@ def _copy_osc52(data: bytes) -> bool:
     seq = _osc52_wrap(b64)
 
     # Prefer /dev/tty so it works in pipelines
+    success = False
     try:
         with open("/dev/tty", "wb", buffering=0) as tty:
             tty.write(seq)
-            if truncated:
-                sys.stderr.write("[termclip] Note: content truncated to fit OSC 52 limits.\n")
-            return True
+            tty.flush()  # Ensure data is written immediately
+            success = True
     except Exception:
-        pass
+        # Fallback: write to stdout only if it's a TTY
+        if sys.stdout.isatty():
+            try:
+                sys.stdout.buffer.write(seq)
+                sys.stdout.buffer.flush()
+                success = True
+            except Exception:
+                pass
 
-    # Fallback: write to stdout only if it's a TTY
-    if sys.stdout.isatty():
-        try:
-            sys.stdout.buffer.write(seq)
-            sys.stdout.flush()
-            if truncated:
-                sys.stderr.write("[termclip] Note: content truncated to fit OSC 52 limits.\n")
-            return True
-        except Exception:
-            return False
-
-    return False
+    if success and truncated:
+        sys.stderr.write("[termclip] Note: content truncated to fit OSC 52 limits.\n")
+        sys.stderr.flush()
+    
+    return success
 
 # ----------------------------- paste -----------------------------------------
+
+def _paste_tmux() -> int:
+    """Try to paste from tmux buffer first."""
+    if "TMUX" not in os.environ:
+        return None
+    
+    try:
+        # Try to show tmux buffer
+        p = subprocess.run(["tmux", "show-buffer"], stdout=sys.stdout, stderr=subprocess.PIPE)
+        return p.returncode
+    except Exception:
+        return None
 
 def paste_text() -> int:
     """
@@ -158,6 +197,11 @@ def paste_text() -> int:
     Over SSH, reading the local clipboard from the remote host is not possible
     without a helper. Run --paste on your local machine.
     """
+    # Try tmux first if available
+    tmux_result = _paste_tmux()
+    if tmux_result is not None:
+        return tmux_result
+
     plat = sys.platform
 
     # macOS
