@@ -1,6 +1,6 @@
 # Maintainer: 0xrushi <your-email@example.com>
 pkgname=termclip
-pkgver=1.0.0
+pkgver=1.0.1
 pkgrel=1
 pkgdesc="Cross-platform terminal clipboard helper with OSC 52 support"
 arch=('any')
@@ -17,7 +17,6 @@ sha256sums=('SKIP')  # Replace with actual sha256sum
 
 build() {
     cd "$srcdir/$pkgname-$pkgver"
-    # Nothing to build for a Python script
 }
 
 check() {
