@@ -1,0 +1,40 @@
+# Maintainer: 0xrushi <your-email@example.com>
+pkgname=termclip
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Cross-platform terminal clipboard helper with OSC 52 support"
+arch=('any')
+url="https://github.com/0xrushi/termclip"
+license=('MIT')
+depends=('python>=3.8')
+optdepends=(
+    'xclip: X11 clipboard support'
+    'xsel: Alternative X11 clipboard support'
+    'wl-clipboard: Wayland clipboard support'
+)
+source=("$pkgname-$pkgver.tar.gz::https://github.com/0xrushi/termclip/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # Replace with actual sha256sum
+
+build() {
+    cd "$srcdir/$pkgname-$pkgver"
+    # Nothing to build for a Python script
+}
+
+check() {
+    cd "$srcdir/$pkgname-$pkgver"
+    # Basic syntax check
+    python -m py_compile termclip.py
+}
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+    
+    # Install the script
+    install -Dm755 termclip.py "$pkgdir/usr/bin/termclip"
+    
+    # Install documentation
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    
+    # Install license
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

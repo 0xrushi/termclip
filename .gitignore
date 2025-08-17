@@ -1,0 +1,63 @@
+# .gitignore for termclip and Python projects
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+build/
+dist/
+release/
+*.egg-info/
+.eggs/
+*.whl
+*.tar.gz
+*.zip
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Homebrew, Arch, Winget package artifacts
+packages/homebrew/*.rb
+packages/arch/*.pkg.tar.*
+packages/winget/**/*.yaml
+
+# Scripts
+scripts/*.log
+
+# Others
+*.log
+*.tmp
+
+# Ignore release artifacts
+release/
+
+# Ignore environment files
+.env
