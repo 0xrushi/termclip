@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+from typing import Optional
 
 # ---------------------------- helpers ----------------------------------------
 
@@ -26,7 +27,7 @@ def _have(cmd: str) -> bool:
 def _read_stdin_bytes() -> bytes:
     return sys.stdin.buffer.read()
 
-def _write_bytes_to(cmd: str, args: list, data: bytes, timeout: float | None = None) -> bool:
+def _write_bytes_to(cmd: str, args: list, data: bytes, timeout: Optional[float] = None) -> bool:
     try:
         p = subprocess.Popen([cmd] + args, stdin=subprocess.PIPE)
         p.stdin.write(data)
