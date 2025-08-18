@@ -331,9 +331,26 @@ def copy_bytes(data: bytes) -> int:
     )
     return 1
 
+def get_version():
+    """Get version from environment variable, version file, or fallback to default."""
+    # Check environment variable first (set during build)
+    if "TERMCLIP_VERSION" in os.environ:
+        return f"termclip {os.environ['TERMCLIP_VERSION']}"
+    
+    try:
+        # Try to read version from version.txt file
+        version_file = os.path.join(os.path.dirname(__file__), "version.txt")
+        with open(version_file, "r") as f:
+            version = f.read().strip()
+            return f"termclip {version}"
+    except (FileNotFoundError, IOError):
+        pass
+    raise RuntimeError("Version not found")
+
 def main():
     ap = argparse.ArgumentParser(description="Pipe-friendly cross-platform clipboard tool.")
     ap.add_argument("--paste", action="store_true", help="Paste from clipboard to stdout (local only).")
+    ap.add_argument("--version", action="version", version=get_version())
     args = ap.parse_args()
 
     if args.paste:
