@@ -61,3 +61,6 @@ release/
 
 # Ignore environment files
 .env
+version.txt
+packages/arch/termclip/**
+packages/arch/pkg/termclip/usr/share/licenses/termclip/LICENSE
