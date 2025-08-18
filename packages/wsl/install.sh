@@ -1,9 +1,15 @@
 #!/bin/bash
 set -e
 
-VERSION="1.0.0"
 INSTALL_DIR="$HOME/.local/bin"
 SCRIPT_URL="https://raw.githubusercontent.com/0xrushi/termclip/main/termclip.py"
+
+get_version() {
+    curl -fsSL "https://api.github.com/repos/0xrushi/termclip/tags" 2>/dev/null | \
+        grep '"name"' | head -1 | sed 's/.*"name": "v\([^"]*\)".*/\1/'
+}
+
+VERSION=$(get_version)
 
 # Colors for output
 RED='\033[0;31m'
@@ -15,7 +21,6 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}Installing termclip v${VERSION} for WSL/Linux...${NC}"
 echo ""
 
-# Check if we're in WSL
 if grep -qEi "(Microsoft|WSL)" /proc/version 2>/dev/null; then
     echo -e "${GREEN}✓ WSL environment detected${NC}"
 elif [[ -n "$WSL_DISTRO_NAME" ]]; then
@@ -24,13 +29,11 @@ else
     echo -e "${YELLOW}⚠ Not in WSL, but continuing installation...${NC}"
 fi
 
-# Check if Python is available
 echo "Checking Python installation..."
 if command -v python3 >/dev/null 2>&1; then
     PYTHON_VERSION=$(python3 --version 2>&1)
     echo -e "${GREEN}✓ Found: $PYTHON_VERSION${NC}"
     
-    # Check Python version (need 3.8+)
     PYTHON_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
     PYTHON_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
     
@@ -38,41 +41,11 @@ if command -v python3 >/dev/null 2>&1; then
         echo -e "${YELLOW}⚠ Python 3.8+ recommended, found $PYTHON_VERSION${NC}"
     fi
 else
-    echo -e "${RED}✗ Python 3 not found. Installing...${NC}"
-    
-    # Detect distro and install Python
-    if command -v apt-get >/dev/null 2>&1; then
-        echo "Detected Debian/Ubuntu. Installing python3..."
-        sudo apt-get update
-        sudo apt-get install -y python3 python3-pip curl
-    elif command -v yum >/dev/null 2>&1; then
-        echo "Detected RHEL/CentOS. Installing python3..."
-        sudo yum install -y python3 python3-pip curl
-    elif command -v dnf >/dev/null 2>&1; then
-        echo "Detected Fedora. Installing python3..."
-        sudo dnf install -y python3 python3-pip curl
-    elif command -v pacman >/dev/null 2>&1; then
-        echo "Detected Arch. Installing python..."
-        sudo pacman -Sy python python-pip curl
-    elif command -v zypper >/dev/null 2>&1; then
-        echo "Detected openSUSE. Installing python3..."
-        sudo zypper install -y python3 python3-pip curl
-    else
-        echo -e "${RED}Error: Could not detect package manager.${NC}"
-        echo "Please install Python 3.8+ manually, then re-run this script."
-        exit 1
-    fi
-    
-    # Verify installation
-    if command -v python3 >/dev/null 2>&1; then
-        echo -e "${GREEN}✓ Python installed successfully${NC}"
-    else
-        echo -e "${RED}✗ Python installation failed${NC}"
-        exit 1
-    fi
+    echo -e "${RED}✗ Python 3 not found. Please install Python 3.8+ manually.${NC}"
+    echo "Then re-run this script."
+    exit 1
 fi
 
-# Create install directory
 echo "Creating installation directory..."
 mkdir -p "$INSTALL_DIR"
 echo -e "${GREEN}✓ Created $INSTALL_DIR${NC}"
@@ -131,7 +104,6 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
         fi
     done
     
-    # Add to current session
     export PATH="$PATH:$INSTALL_DIR"
 else
     echo -e "${GREEN}✓ $INSTALL_DIR already in PATH${NC}"
@@ -153,14 +125,21 @@ echo ""
 
 # Test installation
 if command -v termclip >/dev/null 2>&1; then
-    echo -e "${GREEN}✅ Installation verified - termclip is ready to use!${NC}"
+    echo -e "${GREEN}Installation verified - termclip is ready to use!${NC}"
     
     # Test basic functionality
     if echo "test" | termclip 2>/dev/null; then
-        echo -e "${GREEN}✅ Basic functionality test passed${NC}"
+        echo -e "${GREEN}Basic functionality test passed${NC}"
     else
         echo -e "${YELLOW}⚠ Installation complete, but basic test failed${NC}"
         echo "This might be normal if you're not in a compatible terminal"
+    fi
+    
+    if termclip --version >/dev/null 2>&1; then
+        VERSION_OUTPUT=$(termclip --version)
+        echo -e "${GREEN}Version test passed: $VERSION_OUTPUT${NC}"
+    else
+        echo -e "${YELLOW}⚠ Version flag test failed${NC}"
     fi
 else
     echo -e "${YELLOW}⚠ termclip installed but not in current PATH${NC}"
