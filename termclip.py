@@ -49,6 +49,33 @@ def _write_bytes_to(cmd: str, args: list, data: bytes, timeout: Optional[float] 
 
 # --------------------------- native copy -------------------------------------
 
+def _check_tmux_config() -> tuple[bool, bool]:
+    """Check tmux clipboard and passthrough settings."""
+    if "TMUX" not in os.environ:
+        return True, True  # Not in tmux, assume OK
+    
+    try:
+        # Check set-clipboard setting
+        clipboard_result = subprocess.run(
+            ["tmux", "show-options", "-g", "set-clipboard"], 
+            capture_output=True, text=True
+        )
+        clipboard_on = "on" in clipboard_result.stdout if clipboard_result.returncode == 0 else False
+        
+        # Check allow-passthrough setting (tmux 3.3+)
+        passthrough_result = subprocess.run(
+            ["tmux", "show-options", "-g", "allow-passthrough"], 
+            capture_output=True, text=True
+        )
+        passthrough_on = "on" in passthrough_result.stdout if passthrough_result.returncode == 0 else False
+        
+        _debug(f"tmux set-clipboard: {clipboard_on}, allow-passthrough: {passthrough_on}")
+        return clipboard_on, passthrough_on
+        
+    except Exception as e:
+        _debug(f"Failed to check tmux config: {e}")
+        return False, False
+
 def _copy_tmux(data: bytes) -> bool:
     """Try tmux's built-in clipboard commands first."""
     if "TMUX" not in os.environ:
@@ -57,10 +84,13 @@ def _copy_tmux(data: bytes) -> bool:
     _debug("Trying tmux native clipboard")
     
     try:
-        # Method 1: Try tmux set-buffer + copy-buffer
         text = data.decode("utf-8", errors="replace")
         
-        # Set the buffer content
+        # Check tmux version first
+        version_result = subprocess.run(["tmux", "-V"], capture_output=True, text=True)
+        _debug(f"tmux version: {version_result.stdout.strip()}")
+        
+        # Method 1: Try tmux set-buffer + copy-buffer (tmux 2.6+)
         p1 = subprocess.run(["tmux", "set-buffer", text], capture_output=True, text=True)
         if p1.returncode != 0:
             _debug(f"tmux set-buffer failed: {p1.stderr}")
@@ -73,6 +103,13 @@ def _copy_tmux(data: bytes) -> bool:
             return True
         else:
             _debug(f"tmux copy-buffer failed: {p2.stderr}")
+            
+        # Method 2: Fallback for older tmux - try save-buffer to system clipboard
+        if "unknown command" in p2.stderr:
+            _debug("copy-buffer not available, trying alternative method")
+            # For older tmux, we can't directly copy to system clipboard
+            # Let OSC 52 handle it instead
+            return False
             
     except Exception as e:
         _debug(f"tmux native failed with exception: {e}")
@@ -316,6 +353,19 @@ def copy_bytes(data: bytes) -> int:
     _debug(f"DISPLAY: {os.environ.get('DISPLAY', 'not set')}")
     _debug(f"WAYLAND_DISPLAY: {os.environ.get('WAYLAND_DISPLAY', 'not set')}")
 
+    # Check tmux configuration if in tmux
+    if "TMUX" in os.environ:
+        clipboard_on, passthrough_on = _check_tmux_config()
+        
+        if not clipboard_on:
+            sys.stderr.write("⚠️  tmux clipboard integration is OFF. Add 'set -g set-clipboard on' to ~/.tmux.conf\n")
+            
+        if not passthrough_on:
+            sys.stderr.write("⚠️  tmux passthrough is OFF. Add 'set -g allow-passthrough on' to ~/.tmux.conf for better OSC 52 support\n")
+            
+        if not clipboard_on or not passthrough_on:
+            sys.stderr.write("   Then run: tmux source-file ~/.tmux.conf\n")
+
     # Prefer native unless explicitly forcing OSC-52
     if _copy_native(data):
         _debug("Native clipboard succeeded")
@@ -323,12 +373,39 @@ def copy_bytes(data: bytes) -> int:
 
     if _copy_osc52(data):
         _debug("OSC52 clipboard succeeded")
+        
+        # Additional warnings for tmux users
+        if "TMUX" in os.environ:
+            clipboard_on, passthrough_on = _check_tmux_config()
+            if not clipboard_on or not passthrough_on:
+                sys.stderr.write("📋 Clipboard data sent via OSC 52. If pasting doesn't work, check tmux config above.\n")
+            else:
+                sys.stderr.write("📋 Clipboard data sent via OSC 52.\n")
+        
         return 0
 
     _debug("All clipboard methods failed")
-    sys.stderr.write(
-        "termclip: no clipboard method worked (no pbcopy/clip/wl-copy/xclip/xsel, or terminal refused OSC 52).\n"
-    )
+    
+    # Enhanced error message for tmux users
+    if "TMUX" in os.environ:
+        clipboard_on, passthrough_on = _check_tmux_config()
+        if not clipboard_on or not passthrough_on:
+            sys.stderr.write(
+                "termclip: clipboard failed. Your tmux config may need:\n"
+                "  set -g set-clipboard on\n"
+                "  set -g allow-passthrough on\n"
+                "Then: tmux source-file ~/.tmux.conf\n"
+            )
+        else:
+            sys.stderr.write(
+                "termclip: clipboard failed. Your terminal may not support OSC 52.\n"
+                "Try a terminal that supports OSC 52 (kitty, alacritty, newer gnome-terminal).\n"
+            )
+    else:
+        sys.stderr.write(
+            "termclip: no clipboard method worked (no pbcopy/clip/wl-copy/xclip/xsel, or terminal refused OSC 52).\n"
+        )
+    
     return 1
 
 def get_version():
