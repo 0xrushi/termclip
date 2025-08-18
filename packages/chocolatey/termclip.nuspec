@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>termclip</id>
+    <version>1.0.3</version>
+    <packageSourceUrl>https://github.com/0xrushi/termclip</packageSourceUrl>
+    <owners>0xrushi</owners>
+    <title>termclip</title>
+    <authors>0xrushi</authors>
+    <projectUrl>https://github.com/0xrushi/termclip</projectUrl>
+    <licenseUrl>https://github.com/0xrushi/termclip/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/0xrushi/termclip</projectSourceUrl>
+    <bugTrackerUrl>https://github.com/0xrushi/termclip/issues</bugTrackerUrl>
+    <tags>termclip clipboard terminal osc52 cross-platform python</tags>
+    <summary>Cross-platform terminal clipboard helper with OSC 52 support</summary>
+    <description>
+termclip is a pipe-friendly cross-platform clipboard tool that works over SSH and in terminal environments.
+
+## Features
+- Works over SSH using OSC 52 sequences
+- Cross-platform (Windows, macOS, Linux)
+- Falls back to native clipboard tools when available
+- Supports tmux and screen multiplexers
+- Zero dependencies beyond Python
+
+## Usage
+```
+echo "hello world" | termclip
+termclip --paste
+termclip --version
+```
+
+## Windows Support
+- Uses native PowerShell clipboard when available
+- OSC 52 support for Windows Terminal and modern terminals
+- Works in Command Prompt, PowerShell, and WSL
+    </description>
+    <releaseNotes>
+## 1.0.3
+- Added --version flag
+- Improved tmux support
+- Enhanced Windows compatibility
+- Better error messages
+    </releaseNotes>
+    <dependencies>
+      <dependency id="python" version="3.6.0" />
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
